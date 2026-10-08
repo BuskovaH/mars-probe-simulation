@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Frequency Checker</title>
+<link rel="stylesheet" href="style.css">
+<script src="common.js"></script>
+</head>
+<body>
+<div class="page">
+<div class="card">
+  <a class="back" data-nav href="index.html" data-i18n="back">← Menu</a>
+  <div class="top-row">
+    <div>
+      <h1 data-i18n="title">Frequency Checker</h1>
+      <div class="sub" data-i18n="subtitle">Test your hearing range or check speaker/headphone response.</div>
+    </div>
+    <div id="switches"></div>
+  </div>
+
+  <div class="freq-display">
+    <div class="freq-value" id="freqValue">1000 Hz</div>
+    <div class="freq-label" data-i18n="freqLabel">Frequency</div>
+  </div>
+
+  <div class="control">
+    <div class="control-header">
+      <span data-i18n="freqCtrlLabel">Frequency</span>
+      <span class="val" id="freqSliderVal">1000 Hz</span>
+    </div>
+    <input type="range" id="freqSlider" min="0" max="1000" value="500" step="1">
+    <div class="tick-row">
+      <span>20 Hz</span><span>200 Hz</span><span>2 kHz</span><span>20 kHz</span>
+    </div>
+  </div>
+
+  <div class="control">
+    <div class="control-header"><span data-i18n="waveCtrlLabel">Waveform</span></div>
+    <div class="waveSelect">
+      <button data-wave="sine" class="active" data-i18n="wave_sine">Sine</button>
+      <button data-wave="square" data-i18n="wave_square">Square</button>
+      <button data-wave="triangle" data-i18n="wave_triangle">Triangle</button>
+      <button data-wave="sawtooth" data-i18n="wave_sawtooth">Sawtooth</button>
+    </div>
+  </div>
+
+  <div class="control">
+    <div class="control-header">
+      <span data-i18n="volCtrlLabel">Volume</span>
+      <span class="val" id="volSliderVal">30%</span>
+    </div>
+    <input type="range" id="volSlider" min="0" max="100" value="30" step="1">
+  </div>
+
+  <div class="btn-row">
+    <button id="toggleBtn" class="btn-primary" data-i18n="play">▶ Play Tone</button>
+  </div>
+
+  <div class="note" data-i18n="note"></div>
+</div>
+</div>
+
+<script>
+  const MIN_F = 20, MAX_F = 20000, SLIDER_MAX = 1000;
+
+  const translations = {
+    en: {
+      docTitle: "Frequency Checker",
+      title: "Frequency Checker",
+      subtitle: "Test your hearing range or check speaker/headphone response.",
+      freqLabel: "Frequency", freqCtrlLabel: "Frequency", waveCtrlLabel: "Waveform", volCtrlLabel: "Volume",
+      play: "▶ Play Tone", stop: "■ Stop",
+      note: "Start at low volume — pure tones can be surprisingly loud or piercing, especially at high frequencies. Human hearing typically spans ~20 Hz–20 kHz, but the upper limit drops with age.",
+      wave_sine: "Sine", wave_square: "Square", wave_triangle: "Triangle", wave_sawtooth: "Sawtooth"
+    },
+    cs: {
+      docTitle: "Kontrola frekvence",
+      title: "Kontrola frekvence",
+      subtitle: "Otestujte si rozsah sluchu nebo zkontrolujte reprodukci reproduktorů či sluchátek.",
+      freqLabel: "Frekvence", freqCtrlLabel: "Frekvence", waveCtrlLabel: "Tvar vlny", volCtrlLabel: "Hlasitost",
+      play: "▶ Přehrát tón", stop: "■ Zastavit",
+      note: "Začněte s nízkou hlasitostí — čisté tóny mohou být překvapivě hlasité nebo pronikavé, zejména u vysokých frekvencí. Lidský sluch obvykle pokrývá rozsah ~20 Hz–20 kHz, přičemž horní hranice s věkem klesá.",
+      wave_sine: "Sinusová", wave_square: "Obdélníková", wave_triangle: "Trojúhelníková", wave_sawtooth: "Pilová"
+    }
+  };
+
+  const freqSlider = document.getElementById('freqSlider');
+  const volSlider = document.getElementById('volSlider');
+  const freqValue = document.getElementById('freqValue');
+  const freqSliderVal = document.getElementById('freqSliderVal');
+  const volSliderVal = document.getElementById('volSliderVal');
+  const toggleBtn = document.getElementById('toggleBtn');
+  const waveButtons = document.querySelectorAll('.waveSelect button');
+
+  let audioCtx = null, oscillator = null, gainNode = null;
+  let isPlaying = false, currentWave = 'sine';
+
+  function sliderToFreq(v) {
+    const minLog = Math.log(MIN_F), maxLog = Math.log(MAX_F);
+    return Math.exp(minLog + (maxLog - minLog) / SLIDER_MAX * v);
+  }
+  function formatFreq(f) {
+    return f >= 1000 ? (f / 1000).toFixed(f >= 10000 ? 1 : 2) + ' kHz' : Math.round(f) + ' Hz';
+  }
+  function updateFreqDisplay() {
+    const f = sliderToFreq(parseFloat(freqSlider.value));
+    freqValue.textContent = formatFreq(f);
+    freqSliderVal.textContent = formatFreq(f);
+    if (oscillator && audioCtx) oscillator.frequency.setValueAtTime(f, audioCtx.currentTime);
+  }
+  function updateVolDisplay() {
+    volSliderVal.textContent = volSlider.value + '%';
+    if (gainNode && audioCtx) {
+      const v = parseFloat(volSlider.value) / 100;
+      gainNode.gain.setValueAtTime(v * v * 0.5, audioCtx.currentTime);
+    }
+  }
+  function setToggleLabel() {
+    toggleBtn.dataset.i18n = isPlaying ? 'stop' : 'play';
+    toggleBtn.textContent = App.t(toggleBtn.dataset.i18n);
+    toggleBtn.classList.toggle('playing', isPlaying);
+  }
+
+  function startTone() {
+    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+    oscillator = audioCtx.createOscillator();
+    gainNode = audioCtx.createGain();
+    oscillator.type = currentWave;
+    oscillator.frequency.setValueAtTime(sliderToFreq(parseFloat(freqSlider.value)), audioCtx.currentTime);
+    const v = parseFloat(volSlider.value) / 100;
+    gainNode.gain.setValueAtTime(0, audioCtx.currentTime);
+    gainNode.gain.linearRampToValueAtTime(v * v * 0.5, audioCtx.currentTime + 0.05);
+    oscillator.connect(gainNode);
+    gainNode.connect(audioCtx.destination);
+    oscillator.start();
+    isPlaying = true;
+    setToggleLabel();
+  }
+  function stopTone() {
+    if (oscillator && gainNode && audioCtx) {
+      const now = audioCtx.currentTime;
+      gainNode.gain.cancelScheduledValues(now);
+      gainNode.gain.setValueAtTime(gainNode.gain.value, now);
+      gainNode.gain.linearRampToValueAtTime(0, now + 0.05);
+      oscillator.stop(now + 0.06);
+    }
+    oscillator = null; gainNode = null; isPlaying = false;
+    setToggleLabel();
+  }
+
+  toggleBtn.addEventListener('click', () => isPlaying ? stopTone() : startTone());
+  freqSlider.addEventListener('input', updateFreqDisplay);
+  volSlider.addEventListener('input', updateVolDisplay);
+  waveButtons.forEach(btn => btn.addEventListener('click', () => {
+    waveButtons.forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    currentWave = btn.dataset.wave;
+    if (oscillator) oscillator.type = currentWave;
+  }));
+
+  // stop the tone when the tab is hidden or the page is left
+  document.addEventListener('visibilitychange', () => { if (document.hidden && isPlaying) stopTone(); });
+  window.addEventListener('pagehide', () => { if (isPlaying) stopTone(); });
+
+  updateFreqDisplay();
+  updateVolDisplay();
+  App.init(translations, setToggleLabel);
+</script>
+</body>
+</html>

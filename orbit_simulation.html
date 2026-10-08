@@ -1,0 +1,439 @@
+<!doctype html>
+<html lang="cs">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Simulace oběžné dráhy / Orbit simulation</title>
+<link rel="stylesheet" href="style.css">
+<script src="common.js"></script>
+</head>
+<body class="top">
+<div class="page wide">
+  <a class="back" data-nav href="index.html" data-i18n="back">← Menu</a>
+  <div class="top-row">
+    <div>
+      <h1 data-i18n="title">Simulace oběžné dráhy</h1>
+    </div>
+    <div id="switches"></div>
+  </div>
+
+<main class="orbit-grid">
+<section class="card fluid">
+  <fieldset>
+    <legend data-i18n="preset">Předvolba tělesa</legend>
+    <select id="preset"></select>
+    <div class="hint" data-i18n="presetHint"></div>
+  </fieldset>
+
+  <fieldset>
+    <legend data-i18n="body">Těleso (M)</legend>
+    <label data-i18n="M"></label><input id="M" type="number" step="any">
+    <label data-i18n="R"></label><input id="R" type="number" step="any">
+    <label data-i18n="atmTop"></label><input id="atmTop" type="number" step="any">
+    <div class="row">
+      <div><label data-i18n="rho0"></label><input id="rho0" type="number" step="any"></div>
+      <div><label data-i18n="H"></label><input id="H" type="number" step="any"></div>
+    </div>
+    <div class="hint" id="gInfo"></div>
+  </fieldset>
+
+  <fieldset>
+    <legend data-i18n="probe">Sonda (m)</legend>
+    <div class="row">
+      <div><label data-i18n="m"></label><input id="m" type="number" step="any"></div>
+      <div><label data-i18n="CdA"></label><input id="CdA" type="number" step="any"></div>
+    </div>
+    <div class="hint" data-i18n="CdAHint"></div>
+  </fieldset>
+
+  <fieldset>
+    <legend data-i18n="init">Počáteční podmínky</legend>
+    <div class="row">
+      <div><label data-i18n="x0"></label><input id="x0k" type="number" step="any"></div>
+      <div><label data-i18n="y0"></label><input id="y0" type="number" step="any"></div>
+      <div><label data-i18n="vx0"></label><input id="vx0" type="number" step="any"></div>
+      <div><label data-i18n="vy0"></label><input id="vy0" type="number" step="any"></div>
+    </div>
+    <div class="hint" id="x0Info"></div>
+    <div class="actions">
+      <button class="btn-secondary btn-small" id="circ" type="button" data-i18n="circ"></button>
+    </div>
+  </fieldset>
+
+  <fieldset>
+    <legend data-i18n="sim">Simulace</legend>
+    <div class="row">
+      <div><label data-i18n="dt"></label><input id="dt" type="number" step="any"></div>
+      <div><label data-i18n="steps"></label><input id="steps" type="number" step="1"></div>
+    </div>
+    <div class="hint" id="tInfo"></div>
+    <label data-i18n="speed" for="speed"></label>
+    <select id="speed"></select>
+    <div class="hint" data-i18n="speedHint"></div>
+  </fieldset>
+
+  <div class="btn-row">
+    <button class="btn-primary" id="run" type="button" data-i18n="run"></button>
+    <button class="btn-secondary" id="reset" type="button" data-i18n="reset"></button>
+  </div>
+</section>
+
+<section class="card fluid">
+  <canvas id="plot" width="900" height="900"></canvas>
+  <div id="msg"></div>
+  <div id="result"></div>
+  <details>
+    <summary data-i18n="mathTitle">Jak to funguje</summary>
+    <p data-i18n="math1"></p>
+    <p data-i18n="math2"></p>
+  </details>
+</section>
+</main>
+</div>
+
+<script>
+"use strict";
+
+/* ---------- constants & presets ---------- */
+const G = 6.67430e-11;
+const MAX_STEPS = 2000000;
+
+// M [kg], R [m], atmTop [m], rho0 [kg/m3], H [m]; defaults: x0k, dt, steps
+const PRESETS = {
+  mars:    {color:"#b5543a", cs:"Mars",    en:"Mars",    M:6.4171e23, R:3389500,   atmTop:130000,  rho0:0.020,  H:11100, dt:30, steps:100000},
+  moon:    {color:"#9a9a9a", cs:"Měsíc",   en:"Moon",    M:7.342e22,  R:1737400,   atmTop:0,       rho0:0,      H:1,     dt:30, steps:100000},
+  earth:   {color:"#2e6fd0", cs:"Země",    en:"Earth",   M:5.972e24,  R:6371000,   atmTop:100000,  rho0:1.225,  H:8500,  dt:10, steps:200000},
+  venus:   {color:"#d9b25f", cs:"Venuše",  en:"Venus",   M:4.8675e24, R:6051800,   atmTop:250000,  rho0:65,     H:15900, dt:10, steps:200000},
+  mercury: {color:"#8c7f75", cs:"Merkur",  en:"Mercury", M:3.3011e23, R:2439700,   atmTop:0,       rho0:0,      H:1,     dt:30, steps:100000},
+  jupiter: {color:"#c99b6b", cs:"Jupiter (hladina 1 bar)", en:"Jupiter (1 bar level)", M:1.8982e27, R:69911000, atmTop:1000000, rho0:0.16, H:27000, dt:30, steps:200000},
+  sun:     {color:"#ffcc33", cs:"Slunce (fotosféra)", en:"Sun (photosphere)", M:1.9885e30, R:6.957e8, atmTop:5e7, rho0:2e-4, H:150000, dt:10, steps:300000},
+  custom:  {color:"#880088", cs:"Vlastní hodnoty", en:"Custom values"}
+};
+
+/* ---------- i18n ---------- */
+const T = {
+  cs:{
+    docTitle:"Simulace oběžné dráhy",
+    title:"Simulace oběžné dráhy", preset:"Předvolba tělesa",
+    presetHint:"Vyber těleso, ke kterému sonda letí. Hodnoty můžeš dál libovolně upravit.",
+    body:"Těleso (M)", M:"Hmotnost tělesa M [kg]", R:"Poloměr [m]", atmTop:"Výška atmosféry [m]",
+    rho0:"Hustota u povrchu [kg/m³]", H:"Škálová výška [m]",
+    probe:"Sonda (m)", m:"Hmotnost m [kg]", CdA:"Cd · plocha [m²]", CdAHint:"Odpor vzduchu: F = ½ρv²·Cd·A (výchozí 0,42 · 4 m²).",
+    init:"Počáteční podmínky", x0:"x₀ [× poloměr]", y0:"y₀ [m]", vx0:"vₓ₀ [m/s]", vy0:"v_y₀ [m/s]",
+    circ:"Nastavit rychlost pro kruhovou dráhu", sim:"Simulace", dt:"Krok Δt [s]", steps:"Počet kroků",
+    run:"Spustit animaci", stop:"Zastavit animaci", speed:"Rychlost animace", speedHint:"Kolikrát rychleji než ve skutečnosti animace běží. Dá se měnit i za chodu.", realtime:"reálný čas", reset:"Obnovit předvolbu",
+    mathTitle:"Jak to funguje",
+    math1:"V každém kroku Δt se spočítá gravitační síla F = −GMm/r² · r̂, přičte se odpor atmosféry (proti směru rychlosti), z toho zrychlení a = F/m, pak nová rychlost v += a·Δt a nová poloha x += v·Δt (Eulerova metoda). Simulace končí, když sonda narazí na povrch.",
+    math2:"Hustota atmosféry klesá exponenciálně: ρ(h) = ρ₀·e^(−h/H) a nad zadanou výškou atmosféry je nulová.",
+    g:"Gravitační zrychlení na povrchu", x0m:"Počáteční vzdálenost od středu", vc:"Kruhová rychlost v této vzdálenosti",
+    simTime:"Simulovaný čas", dur:"Doba simulace (max.)", landed:"Sonda přistála", noLanding:"Sonda během simulace nepřistála.",
+    landSpeed:"Rychlost dopadu", landAngle:"Úhel dopadu vůči povrchu", avgSpeed:"Průměrná rychlost",
+    perigee:"Nejnižší výška nad povrchem", apogee:"Nejvyšší výška nad povrchem", calc:"Výpočet trval",
+    d:"d", h:"h", min:"min", s:"s", err:"Neplatná hodnota", errStart:"Sonda začíná uvnitř tělesa (x₀ musí být > 1 poloměr).",
+    ms:"m/s", km:"km", deg:"°", xdist:"x – vzdálenost od středu", ydist:"y – vzdálenost od středu"
+  },
+  en:{
+    docTitle:"Orbit simulation",
+    title:"Orbit simulation", preset:"Body preset",
+    presetHint:"Pick the body the probe is approaching. You can still edit every value.",
+    body:"Body (M)", M:"Body mass M [kg]", R:"Radius [m]", atmTop:"Atmosphere height [m]",
+    rho0:"Surface density [kg/m³]", H:"Scale height [m]",
+    probe:"Probe (m)", m:"Mass m [kg]", CdA:"Cd · area [m²]", CdAHint:"Drag: F = ½ρv²·Cd·A (default 0.42 · 4 m²).",
+    init:"Initial conditions", x0:"x₀ [× radius]", y0:"y₀ [m]", vx0:"vₓ₀ [m/s]", vy0:"v_y₀ [m/s]",
+    circ:"Set speed for a circular orbit", sim:"Simulation", dt:"Step Δt [s]", steps:"Number of steps",
+    run:"Run animation", stop:"Stop animation", speed:"Animation speed", speedHint:"How many times faster than real time the animation runs. Can be changed while it plays.", realtime:"real time", reset:"Reset to preset",
+    mathTitle:"How it works",
+    math1:"Each step Δt computes gravity F = −GMm/r² · r̂, adds atmospheric drag (opposite to velocity), gets a = F/m, then updates v += a·Δt and x += v·Δt (Euler method). The simulation stops when the probe hits the surface.",
+    math2:"Atmospheric density falls off exponentially: ρ(h) = ρ₀·e^(−h/H) and is zero above the given atmosphere height.",
+    g:"Surface gravity", x0m:"Initial distance from centre", vc:"Circular speed at this distance",
+    simTime:"Simulated time", dur:"Simulation length (max.)", landed:"Probe landed", noLanding:"The probe did not land during the simulation.",
+    landSpeed:"Impact speed", landAngle:"Impact angle to surface", avgSpeed:"Average speed",
+    perigee:"Lowest altitude", apogee:"Highest altitude", calc:"Computation took",
+    d:"d", h:"h", min:"min", s:"s", err:"Invalid value", errStart:"The probe starts inside the body (x₀ must be > 1 radius).",
+    ms:"m/s", km:"km", deg:"°", xdist:"x – distance from centre", ydist:"y – distance from centre"
+  }
+};
+let lang = App.lang;
+const t = k => T[lang][k];
+
+/* ---------- DOM ---------- */
+const $ = id => document.getElementById(id);
+const ids = ["M","R","atmTop","rho0","H","m","CdA","x0k","y0","vx0","vy0","dt","steps"];
+const el = Object.fromEntries(ids.map(i => [i, $(i)]));
+const presetSel = $("preset"), canvas = $("plot"), ctx = canvas.getContext("2d");
+
+function fillPresetOptions(){
+  const cur = presetSel.value || "mars";
+  presetSel.innerHTML = "";
+  for (const [k,p] of Object.entries(PRESETS)){
+    const o = document.createElement("option"); o.value = k; o.textContent = p[lang]; presetSel.appendChild(o);
+  }
+  presetSel.value = cur;
+}
+const SPEEDS = [1, 10, 100, 1000, 10000, 100000, 1000000];
+function fillSpeedOptions(){
+  const sel = $("speed"), cur = sel.value || "1000";
+  sel.innerHTML = "";
+  for (const v of SPEEDS){
+    const o = document.createElement("option"); o.value = v;
+    o.textContent = `${v.toLocaleString(lang)}×` + (v === 1 ? ` (${t("realtime")})` : "");
+    sel.appendChild(o);
+  }
+  sel.value = cur;
+}
+
+/* ---------- helpers ---------- */
+const fmt = (v, d=3) => Number.isFinite(v) ? (Math.abs(v) >= 1e6 || (Math.abs(v) < 1e-2 && v !== 0) ? v.toExponential(d) : (+v.toFixed(d)).toLocaleString(lang)) : "–";
+function dhms(sec){
+  const d = Math.floor(sec/86400), h = Math.floor(sec%86400/3600), mi = Math.floor(sec%3600/60), s = Math.floor(sec%60);
+  return `${d} ${t("d")} ${h} ${t("h")} ${mi} ${t("min")} ${s} ${t("s")}`;
+}
+const num = id => parseFloat(el[id].value);
+
+function loadPreset(key){
+  const p = PRESETS[key]; if (!p || key === "custom") return;
+  el.M.value = p.M; el.R.value = p.R; el.atmTop.value = p.atmTop; el.rho0.value = p.rho0; el.H.value = p.H;
+  el.m.value = 100; el.CdA.value = (0.42*4).toFixed(2);
+  el.x0k.value = 2; el.y0.value = 0; el.vx0.value = 0;
+  const vc = Math.sqrt(G*p.M/(2*p.R));
+  el.vy0.value = Math.round(0.75*vc);           // sub-circular -> probe lands
+  el.dt.value = p.dt; el.steps.value = p.steps;
+  updateInfo();
+}
+
+function updateInfo(){
+  const M = num("M"), R = num("R"), k = num("x0k");
+  if (M > 0 && R > 0) $("gInfo").textContent = `${t("g")}: ${fmt(G*M/(R*R),3)} m/s²`;
+  if (M > 0 && R > 0 && k > 0){
+    const r = k*R;
+    $("x0Info").textContent = `${t("x0m")}: ${fmt(r/1000,1)} km · ${t("vc")}: ${fmt(Math.sqrt(G*M/r),1)} m/s`;
+  }
+  const dt = num("dt"), n = num("steps");
+  if (dt > 0 && n > 0) $("tInfo").textContent = `${t("dur")}: ${dhms(dt*n)}`;
+}
+
+/* ---------- simulation ---------- */
+function simulate(p){
+  const {M, R, atmTop, rho0, H, m, CdA, dt, steps} = p;
+  const GM = G*M;
+  let x = p.x0, y = p.y0, vx = p.vx0, vy = p.vy0;
+  const xs = new Float64Array(steps+1), ys = new Float64Array(steps+1);
+  xs[0] = x; ys[0] = y;
+  let n = 1, landed = false, sumV = Math.hypot(vx, vy);
+  let rmin = Math.hypot(x,y), rmax = rmin, impact = null;
+
+  for (let i = 0; i < steps; i++){
+    const r2 = x*x + y*y, r = Math.sqrt(r2);
+    // gravity (acceleration = GM/r^2 towards centre)
+    let ax = -GM/r2 * (x/r), ay = -GM/r2 * (y/r);
+    // atmospheric drag, opposing velocity
+    const v = Math.hypot(vx, vy);
+    const alt = r - R;
+    if (v > 0 && rho0 > 0 && alt < atmTop){
+      const rho = rho0*Math.exp(-Math.max(alt,0)/H);
+      const aD = Math.min(0.5*rho*v*v*CdA/m, v/dt); // clamp: drag can slow, never reverse, the probe within one step
+      ax -= aD*vx/v; ay -= aD*vy/v;
+    }
+    vx += ax*dt; vy += ay*dt;
+    x += vx*dt;  y += vy*dt;
+    xs[n] = x; ys[n] = y; n++;
+    const r_new = Math.hypot(x,y);
+    sumV += Math.hypot(vx,vy);
+    if (r_new < rmin) rmin = r_new; if (r_new > rmax) rmax = r_new;
+    if (r_new < R){
+      landed = true;
+      const vr = (x*vx + y*vy)/r_new;
+      const vt = Math.abs(x*vy - y*vx)/r_new;
+      impact = {speed: Math.hypot(vx,vy), angle: Math.atan2(-vr, vt)*180/Math.PI};
+      break;
+    }
+  }
+  return {xs, ys, n, landed, impact, avgV: sumV/n, rmin, rmax, time: (n-1)*dt};
+}
+
+/* ---------- plotting ---------- */
+function viridis(f){
+  const s = [[68,1,84],[59,82,139],[33,145,140],[94,201,98],[253,231,37]];
+  const q = Math.min(Math.max(f,0),1)*(s.length-1), i = Math.min(Math.floor(q), s.length-2), u = q-i;
+  return `rgb(${s[i].map((c,j)=>Math.round(c+(s[i+1][j]-c)*u)).join(",")})`;
+}
+function draw(res, p, upTo, head){
+  if (upTo === undefined) upTo = res.n;
+  const cssW = canvas.clientWidth || 600, dpr = window.devicePixelRatio || 1;
+  canvas.width = canvas.height = Math.round(cssW*dpr);
+  const W = canvas.width, pad = 58*dpr;
+  ctx.setTransform(1,0,0,1,0,0);
+  ctx.fillStyle = "#0b0e14"; ctx.fillRect(0,0,W,W);
+
+  let lim = p.R*1.05;
+  for (let i = 0; i < res.n; i++) lim = Math.max(lim, Math.abs(res.xs[i]), Math.abs(res.ys[i]));
+  lim *= 1.08;
+  const sc = (W/2 - pad)/lim, cx = W/2, cy = W/2;
+  const X = x => cx + x*sc, Y = y => cy - y*sc;
+
+  // axes: gridlines, tick labels and titles in distance units
+  const unit = lim < 1e8 ? {n:"km", d:1e3} : lim < 1e11 ? {n:"Mm", d:1e6} : {n:"Gm", d:1e9};
+  const raw = (2*lim/unit.d)/8, mag = Math.pow(10, Math.floor(Math.log10(raw))), q = raw/mag;
+  const step = mag*(q < 1.5 ? 1 : q < 3.5 ? 2 : q < 7.5 ? 5 : 10);
+  const kmax = Math.floor(lim/unit.d/step);
+  const tick = v => (+(v).toPrecision(6)).toLocaleString(lang);
+  ctx.lineWidth = 1; ctx.font = `${11*dpr}px system-ui,sans-serif`;
+  for (let k = -kmax; k <= kmax; k++){
+    const v = k*step, pos = v*unit.d*sc;
+    ctx.strokeStyle = k === 0 ? "rgba(255,255,255,.28)" : "rgba(255,255,255,.08)";
+    ctx.beginPath(); ctx.moveTo(cx+pos, pad); ctx.lineTo(cx+pos, W-pad); ctx.moveTo(pad, cy-pos); ctx.lineTo(W-pad, cy-pos); ctx.stroke();
+    ctx.fillStyle = "rgba(255,255,255,.6)";
+    ctx.textAlign = "center"; ctx.textBaseline = "top"; ctx.fillText(tick(v), cx+pos, W-pad+6*dpr);
+    ctx.textAlign = "right"; ctx.textBaseline = "middle"; ctx.fillText(tick(v), pad-6*dpr, cy-pos);
+  }
+  ctx.fillStyle = "rgba(255,255,255,.85)"; ctx.font = `${12*dpr}px system-ui,sans-serif`;
+  ctx.textAlign = "center"; ctx.textBaseline = "bottom"; ctx.fillText(`${t("xdist")} [${unit.n}]`, cx, W-6*dpr);
+  ctx.save(); ctx.translate(14*dpr, cy); ctx.rotate(-Math.PI/2); ctx.textBaseline = "middle"; ctx.fillText(`${t("ydist")} [${unit.n}]`, 0, 0); ctx.restore();
+  ctx.textBaseline = "alphabetic";
+
+  // atmosphere + body
+  if (p.atmTop > 0 && p.rho0 > 0){
+    ctx.beginPath(); ctx.arc(cx,cy,(p.R+p.atmTop)*sc,0,2*Math.PI);
+    ctx.fillStyle = "rgba(120,170,255,.18)"; ctx.fill();
+  }
+  ctx.beginPath(); ctx.arc(cx,cy,p.R*sc,0,2*Math.PI);
+  ctx.fillStyle = p.color; ctx.fill(); ctx.strokeStyle = "rgba(255,255,255,.55)"; ctx.lineWidth = 1.5*dpr; ctx.stroke();
+
+  // trajectory (downsampled), colour = time
+  const stride = Math.max(1, Math.floor(res.n/8000));
+  for (let i = 0; i < upTo; i += stride){
+    ctx.fillStyle = viridis(i/(res.n-1 || 1));
+    ctx.beginPath(); ctx.arc(X(res.xs[i]), Y(res.ys[i]), 1.8*dpr, 0, 2*Math.PI); ctx.fill();
+  }
+  // start & end markers
+  ctx.fillStyle = "#fff"; ctx.beginPath(); ctx.arc(X(res.xs[0]),Y(res.ys[0]),4*dpr,0,2*Math.PI); ctx.fill();
+  if (upTo >= res.n){
+    if (res.landed){
+      ctx.fillStyle = "#ff3b3b"; ctx.beginPath(); ctx.arc(X(res.xs[res.n-1]),Y(res.ys[res.n-1]),5*dpr,0,2*Math.PI); ctx.fill();
+    }
+  } else if (upTo > 0){            // probe "head" while animating
+    ctx.fillStyle = "#ffffff"; ctx.strokeStyle = "#ff3b3b"; ctx.lineWidth = 2*dpr;
+    const hx = head ? head.x : res.xs[upTo-1], hy = head ? head.y : res.ys[upTo-1];
+    ctx.beginPath(); ctx.arc(X(hx),Y(hy),5*dpr,0,2*Math.PI); ctx.fill(); ctx.stroke();
+  }
+}
+
+/* ---------- run ---------- */
+let lastRun = null, anim = null;
+function stat(label, value){ return `<div class="stat"><b>${label}</b><span>${value}</span></div>`; }
+
+// Validate inputs, run the simulation. Returns {res,p,ms} or null.
+function compute(){
+  const msg = $("msg"); msg.className = ""; msg.textContent = "";
+  const p = {M:num("M"), R:num("R"), atmTop:num("atmTop"), rho0:num("rho0"), H:num("H"), m:num("m"), CdA:num("CdA"),
+             dt:num("dt"), steps:Math.floor(num("steps")), y0:num("y0"), vx0:num("vx0"), vy0:num("vy0"),
+             color:(PRESETS[presetSel.value]||PRESETS.custom).color};
+  p.x0 = num("x0k")*p.R;
+  const bad = [["M",p.M>0],["R",p.R>0],["atmTop",p.atmTop>=0],["rho0",p.rho0>=0],["H",p.H>0],["m",p.m>0],["CdA",p.CdA>=0],
+               ["dt",p.dt>0],["steps",p.steps>0],["x0k",p.x0>0],["y0",Number.isFinite(p.y0)],["vx0",Number.isFinite(p.vx0)],["vy0",Number.isFinite(p.vy0)]]
+              .filter(([,ok]) => !ok).map(([k]) => k);
+  ids.forEach(i => el[i].style.outline = bad.includes(i) ? "2px solid var(--warn)" : "");
+  if (bad.length){ msg.className = "err"; msg.textContent = t("err"); return null; }
+  if (Math.hypot(p.x0, p.y0) <= p.R){ msg.className = "err"; msg.textContent = t("errStart"); return null; }
+  p.steps = Math.min(p.steps, MAX_STEPS);
+  const t0 = performance.now();
+  const res = simulate(p);
+  return {res, p, ms: performance.now() - t0};
+}
+
+function showStats(r){
+  const {res, p, ms} = r;
+  $("msg").className = "";
+  $("msg").textContent = res.landed ? t("landed") : t("noLanding");
+  let html = "";
+  if (res.landed){
+    html += stat(t("landSpeed"), `${fmt(res.impact.speed,1)} ${t("ms")}`);
+    html += stat(t("landAngle"), `${fmt(res.impact.angle,1)} ${t("deg")}`);
+  }
+  html += stat(t("simTime"), dhms(res.time));
+  html += stat(t("avgSpeed"), `${fmt(res.avgV/1000,2)} km/s`);
+  html += stat(t("perigee"), `${fmt((res.rmin-p.R)/1000,1)} ${t("km")}`);
+  html += stat(t("apogee"), `${fmt((res.rmax-p.R)/1000,1)} ${t("km")}`);
+  html += stat(t("calc"), `${fmt(ms,1)} ms`);
+  $("result").innerHTML = html;
+}
+
+function setRunButton(playing){
+  const b = $("run"); b.dataset.i18n = playing ? "stop" : "run"; b.textContent = t(b.dataset.i18n);
+  b.classList.toggle("playing", playing);
+}
+function stopAnim(){
+  if (anim){ cancelAnimationFrame(anim.raf); anim = null; }
+  setRunButton(false);
+}
+
+// Static replot: recompute and draw the complete trajectory (used whenever a value changes)
+function update(){
+  stopAnim();
+  const r = compute();
+  if (!r) return;
+  lastRun = r;
+  draw(r.res, r.p);
+  showStats(r);
+}
+
+// Animation: "Run" button
+function play(){
+  if (anim){ stopAnim(); if (lastRun){ draw(lastRun.res, lastRun.p); showStats(lastRun); } return; }
+  const r = compute();
+  if (!r) return;
+  lastRun = r;
+  $("result").innerHTML = "";
+  const {res, p} = r, total = (res.n-1)*p.dt;
+  let simT = 0, last = performance.now();
+  anim = {raf: 0};
+  setRunButton(true);
+  const frame = now => {
+    const speed = +$("speed").value || 1;            // simulated seconds per real second
+    simT += Math.min(now - last, 100)/1000*speed;    // cap: tab was in background
+    last = now;
+    if (simT >= total){
+      anim = null; setRunButton(false); draw(res, p); showStats(r); return;
+    }
+    const fi = simT/p.dt, i0 = Math.floor(fi), u = fi - i0;
+    const head = {x: res.xs[i0] + u*(res.xs[i0+1]-res.xs[i0]), y: res.ys[i0] + u*(res.ys[i0+1]-res.ys[i0])};
+    draw(res, p, i0+1, head);
+    $("msg").textContent = `${t("simTime")}: ${dhms(simT)}`;
+    anim.raf = requestAnimationFrame(frame);
+  };
+  anim.raf = requestAnimationFrame(frame);
+}
+
+/* ---------- wiring ---------- */
+let debounce = 0;
+const scheduleUpdate = () => { clearTimeout(debounce); debounce = setTimeout(update, 150); };
+
+$("run").onclick = play;
+$("reset").onclick = () => { if (presetSel.value !== "custom") loadPreset(presetSel.value); update(); };
+presetSel.onchange = () => { loadPreset(presetSel.value); update(); };
+$("circ").onclick = () => {
+  const M = num("M"), R = num("R"), k = num("x0k");
+  if (M > 0 && R > 0 && k > 0){ el.vx0.value = 0; el.vy0.value = Math.sqrt(G*M/(k*R)).toFixed(1); updateInfo(); update(); }
+};
+ids.forEach(i => el[i].addEventListener("input", () => {
+  if (["M","R","atmTop","rho0","H"].includes(i)) presetSel.value = "custom";
+  updateInfo();
+  scheduleUpdate();                       // any value change -> static replot
+}));
+document.querySelectorAll("input").forEach(i => i.addEventListener("keydown", e => { if (e.key === "Enter") update(); }));
+window.addEventListener("resize", () => { if (!anim && lastRun) draw(lastRun.res, lastRun.p); });
+
+// Language handling comes from common.js; this runs once at start and on every language change
+App.init(T, l => {
+  lang = l;
+  fillPresetOptions(); fillSpeedOptions(); updateInfo();
+  setRunButton(!!anim);
+  if (!anim && lastRun) update();
+});
+
+presetSel.value = "mars";
+loadPreset("mars");
+update();
+</script>
+</body>
+</html>
